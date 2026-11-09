@@ -1,6 +1,8 @@
 #include <Wire.h> 
 
-const int flexPin = 3; 
+const int flexPin = A3; 
+int flexValue; 
+int offSet; 
 
 void setup() {
   Serial.begin(9600); // Initialize serial communication
@@ -12,5 +14,9 @@ void loop(){
     Serial.print("Flex Sensor Value: ");
     Serial.println(flexValue); // Print the flex sensor value to the serial monitor
     delay(500); // Wait for 500 milliseconds before the next reading
+
+    offSet = (flexValue - 900);
+    Serial.print("offSet:");
+    Serial.println(minus900);
 
 }
