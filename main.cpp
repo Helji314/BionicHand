@@ -3,14 +3,14 @@
 #include <WiFi.h>
 #include <esp_now.h>
 
-const int numberOfFingers = 6;
+const int numberOfFingers = 5;
 const int numberOfSamples = 15;
 const unsigned long sendIntervalMs = 100;
 
 // Replace these placeholder pins and calibration limits with the final hardware values.
-const int flexPins[numberOfFingers] = {4, 5, 6, 7, 8, 9};
-const int minInput[numberOfFingers] = {700, 700, 700, 700, 700, 700};
-const int maxInput[numberOfFingers] = {3333, 3333, 3333, 3333, 3333, 3333};
+const int flexPins[numberOfFingers] = {4, 5, 6, 7, 8};
+const int minInput[numberOfFingers] = {700, 700, 700, 700, 700};
+const int maxInput[numberOfFingers] = {3333, 3333, 3333, 3333, 3333};
 
 const uint8_t receiverMac[] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
 
@@ -58,11 +58,11 @@ bool sendFingerValues() {
     sizeof(payload),
     "F0:%.3f,S0:0,F1:%.3f,F2:%.3f,F3:%.3f,F4:%.3f,F5:%.3f\n",
     roundedFingerValue[0],
+    roundedFingerValue[0],
     roundedFingerValue[1],
     roundedFingerValue[2],
     roundedFingerValue[3],
-    roundedFingerValue[4],
-    roundedFingerValue[5]
+    roundedFingerValue[4]
   );
 
   if (payloadLength < 0 || payloadLength >= (int)sizeof(payload)) {
