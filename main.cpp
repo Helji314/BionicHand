@@ -1,79 +1,104 @@
 #include <Arduino.h>
 #include <Wire.h>
-//#include <RunningMedian.h>
+#include <WiFi.h>
+#include <esp_now.h>
 
-const int minInput[] = {700};
-const int maxInput[] = {3333};
-const int minoutput = 0;
-const int maxoutput = 1;
-
-int portNumbers[] = {4};
-
-
-
-int flexValue;
-int previousflexValue;
-
-const int flexPin = 4;
+const int numberOfFingers = 6;
 const int numberOfSamples = 15;
-const int numberOfFingers = 1;
+const unsigned long sendIntervalMs = 100;
 
-float roundedfingerValue[numberOfFingers];
-float previousfingerValue[numberOfFingers];
-long SensorRead[numberOfFingers];
+// Replace these placeholder pins and calibration limits with the final hardware values.
+const int flexPins[numberOfFingers] = {4, 5, 6, 7, 8, 9};
+const int minInput[numberOfFingers] = {700, 700, 700, 700, 700, 700};
+const int maxInput[numberOfFingers] = {3333, 3333, 3333, 3333, 3333, 3333};
 
+const uint8_t receiverMac[] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
 
+long sensorRead[numberOfFingers];
+float previousFingerValue[numberOfFingers] = {};
+float roundedFingerValue[numberOfFingers];
+bool streamingEnabled = false;
+unsigned long lastSendTime = 0;
 
-
-float map_to_0_1(float value, float min_input, float max_input){
-  float result = (value - min_input) / (max_input - min_input);
-  return(result);
+float mapToZeroOne(float value, float minimum, float maximum) {
+  float result = (value - minimum) / (maximum - minimum);
+  return constrain(result, 0.0f, 1.0f);
 }
 
-
-
-
-
-
-float* read_fingers(){
-  for (int finger = 0; finger < numberOfFingers; finger++){ 
-    SensorRead[finger] = 0;
+void readFingers() {
+  for (int finger = 0; finger < numberOfFingers; finger++) {
+    sensorRead[finger] = 0;
   }
-  for (int i = 0; i < numberOfSamples; i++){
-    for (int finger = 0; finger < numberOfFingers; finger++){
-      SensorRead[finger] += analogRead(portNumbers[finger]); // Read the analog value from the flex sensor
+
+  for (int sample = 0; sample < numberOfSamples; sample++) {
+    for (int finger = 0; finger < numberOfFingers; finger++) {
+      sensorRead[finger] += analogRead(flexPins[finger]);
     }
-    delay(50); // Wait for 50 milliseconds before the next reading
+    delay(50);
   }
-  float fingerValue[numberOfFingers];
-  for (int finger = 0; finger < numberOfFingers; finger++){
-    int intermediatValue = 0;
-    intermediatValue = SensorRead[finger] / numberOfSamples;
-    fingerValue[finger] = map_to_0_1(intermediatValue, minInput[finger], maxInput[finger]);
-    if(fingerValue[finger] < 0){
-      fingerValue[finger] = 0;
-    }
-    roundedfingerValue[finger] = (fingerValue[finger] + previousfingerValue[finger]) / 2;
-    previousfingerValue[finger] = fingerValue[finger];
+
+  for (int finger = 0; finger < numberOfFingers; finger++) {
+    const float sensorAverage = sensorRead[finger] / (float)numberOfSamples;
+    const float fingerValue = mapToZeroOne(
+      sensorAverage,
+      minInput[finger],
+      maxInput[finger]
+    );
+    roundedFingerValue[finger] = (fingerValue + previousFingerValue[finger]) / 2.0f;
+    previousFingerValue[finger] = fingerValue;
   }
-  return(roundedfingerValue);
 }
 
+bool sendFingerValues() {
+  readFingers();
+
+  char payload[128];
+  const int payloadLength = snprintf(
+    payload,
+    sizeof(payload),
+    "F0:%.3f,S0:0,F1:%.3f,F2:%.3f,F3:%.3f,F4:%.3f,F5:%.3f\n",
+    roundedFingerValue[0],
+    roundedFingerValue[1],
+    roundedFingerValue[2],
+    roundedFingerValue[3],
+    roundedFingerValue[4],
+    roundedFingerValue[5]
+  );
+
+  if (payloadLength < 0 || payloadLength >= (int)sizeof(payload)) {
+    return false;
+  }
+
+  return esp_now_send(receiverMac, (uint8_t*)payload, payloadLength) == ESP_OK;
+}
 
 void setup() {
-  Serial.begin(9600); // Initialize serial communication
-  pinMode(flexPin, INPUT); // Set the flex sensor pin as input
-  delay(500);
-  Serial.println("reset");
+  Serial.begin(115200);
+  for (int finger = 0; finger < numberOfFingers; finger++) {
+    pinMode(flexPins[finger], INPUT);
+  }
 
-  
+  WiFi.mode(WIFI_STA);
+  if (esp_now_init() != ESP_OK) {
+    return;
+  }
+
+  esp_now_peer_info_t peerInfo = {};
+  memcpy(peerInfo.peer_addr, receiverMac, sizeof(receiverMac));
+  peerInfo.channel = 0;
+  peerInfo.encrypt = false;
+  esp_now_add_peer(&peerInfo);
 }
 
-void loop(){
-  float* fingerValues;
-  fingerValues = read_fingers();
-  //Serial.print("Sensor Values: ");
-  for(int i = 0; i < numberOfFingers; i++){
-    Serial.println(fingerValues[i]);
+void loop() {
+  while (Serial.available() > 0) {
+    if (Serial.read() == 's') {
+      streamingEnabled = true;
+    }
+  }
+
+  if (streamingEnabled && millis() - lastSendTime >= sendIntervalMs) {
+    lastSendTime = millis();
+    sendFingerValues();
   }
 }
