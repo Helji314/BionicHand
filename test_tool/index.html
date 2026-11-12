@@ -1,0 +1,661 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prosthesis test tool</title>
+<!-- One page for both sides: the sensor glove (repo ansteuerung_Gruppe1) and the
+     robot hand (repo ansteuerung_hand). It finds out by itself which board is connected. -->
+<!-- 3D model (without internet the flat hand is drawn) -->
+<script async src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js" onerror="window.noThree = true"></script>
+<!-- Parts of the robot hand from its stl/*.stl files (generated in ansteuerung_hand with modell/stl_zu_js.py) -->
+<script src="hand_modell.js"></script>
+<script>
+  // Theme before the first paint, so nothing flashes light. Same storage keys as the old pages.
+  try { document.documentElement.dataset.thema = localStorage.getItem("thema") || "dunkel"; }
+  catch (e) { document.documentElement.dataset.thema = "dunkel"; }
+  // Language: English is the default, German can be chosen (remembered).
+  try { document.documentElement.lang = localStorage.getItem("sprache") === "de" ? "de" : "en"; } catch (e) {}
+  // Style (clean / brutal) and layout, picked in the tool bar (remembered)
+  (function () {
+    const r = document.documentElement;
+    let stil = "clean", layout = "dashboard";
+    try { stil = localStorage.getItem("stil") || stil; layout = localStorage.getItem("layout") || layout; } catch (e) {}
+    r.dataset.stil = ["clean", "brutal"].includes(stil) ? stil : "clean";
+    r.dataset.layout = ["dashboard", "fokus", "debug", "liste"].includes(layout) ? layout : "dashboard";
+  })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..900&family=Geist+Mono:wght@400;600&family=Geist:wght@400..700&family=JetBrains+Mono:wght@400;700&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body data-device="glove">
+<header>
+  <h1 data-t="titel"></h1>
+  <label class="geraet">
+    <select id="geraet" data-t-aria="geraet" data-t-title="geraetTitel">
+      <option value="glove" data-t="g_glove"></option>
+      <option value="hand" data-t="g_hand"></option>
+      <option value="sim" data-t="g_sim"></option>
+      <option value="bglove" data-t="g_bglove"></option>
+      <option value="bhand" data-t="g_bhand"></option>
+      <option value="bsniff" data-t="g_bsniff"></option>
+    </select>
+    <span id="erkannt" class="klein"></span>
+  </label>
+  <span id="status" class="status"></span>
+  <span id="mac" hidden data-t-title="macTitel"></span>
+  <div class="knoepfe">
+    <div class="modus" role="group" data-t-aria="werSteuert" data-only="hand">
+      <button id="mHandschuh" data-t="handschuh" data-t-title="handschuhTitel" data-seriell disabled></button>
+      <button id="mManuell" data-t="vonHand" data-t-title="vonHandTitel" data-seriell disabled></button>
+    </div>
+    <button id="verbinden" class="haupt"></button>
+    <button id="verbinden2" data-t="verbinden2" data-t-title="verbinden2Titel" hidden></button>
+    <button id="demo"></button>
+    <button id="demoZwei" data-t="demoZwei" data-t-title="demoZweiTitel"></button>
+    <button id="info" data-t="info" data-t-title="infoTitel" data-seriell data-only="glove hand bglove bhand bsniff" disabled></button>
+    <button id="thema" data-t-title="themaTitel"></button>
+    <select id="sprache" data-t-aria="sprache">
+      <option value="en">English</option>
+      <option value="de">Deutsch</option>
+    </select>
+  </div>
+</header>
+
+<nav class="leiste" data-t-aria="werkzeugLeiste">
+  <button id="aufnahmeKnopf" aria-pressed="false" data-t-title="aufnahmeTitel"><span data-t="aufnahme"></span> <span id="aufnahmeLaeuft"></span></button>
+  <button id="linkKnopf" aria-pressed="false" data-t="linktest" data-t-title="linktestTitel"></button>
+  <button id="signaleKnopf" aria-pressed="false" data-t="signale" data-t-title="signaleTitel"></button>
+  <button id="kalibrieren" data-t="kalibrieren" data-t-title="kalibrierenTitel" data-only="glove" disabled></button>
+  <button id="kamKalibrieren" data-t="kamKalibrieren" data-t-title="kamKalibrierenTitel" data-only="glove" disabled></button>
+  <button id="grenzenKnopf" aria-pressed="false" data-t="grenzen" data-t-title="grenzenTitel" data-only="hand"></button>
+  <button id="pinsKnopf" aria-pressed="false" data-t="pins" data-t-title="pinsTitel" data-only="glove hand"></button>
+  <button id="flashKnopf" data-t="flashen" data-t-title="flashenTitel"></button>
+  <span id="versionen" class="klein"></span>
+  <span class="darstellung">
+    <select id="layoutWahl" data-t-aria="layout" data-t-title="layout">
+      <option value="dashboard" data-t="l_dashboard"></option>
+      <option value="fokus" data-t="l_fokus"></option>
+      <option value="debug" data-t="l_debug"></option>
+      <option value="liste" data-t="l_liste"></option>
+    </select>
+    <select id="stilWahl" data-t-aria="stil" data-t-title="stil">
+      <option value="clean" data-t="s_clean"></option>
+      <option value="brutal" data-t="s_brutal"></option>
+    </select>
+  </span>
+</nav>
+<div id="versionHinweis" class="hinweis" hidden><span id="versionText"></span><button class="aktion" id="versionFlash" data-t="flashen"></button></div>
+<div id="keinSerial" class="hinweis" hidden data-t-html="keinSerial"></div>
+<div data-only="hand">
+  <div id="resetHinweis" class="hinweis reset" hidden>
+    <span id="resetText" data-t="resetManuell"></span>
+    <button id="reset" class="haupt" data-t="zurueckgeben" data-t-title="resetTitel" data-seriell></button>
+  </div>
+</div>
+
+<main>
+  <section class="panel hand-panel">
+    <div class="zeile">
+      <h2 data-t="hand"></h2>
+      <div class="hand-knoepfe" id="handKnoepfe" hidden>
+        <button id="explosion" class="umschalter" aria-pressed="false" data-t="explosion" data-t-title="explosionTitel"></button>
+        <button id="loesen" class="umschalter" aria-pressed="false" data-t="loesen" data-t-title="loesenTitel"></button>
+        <button id="zusammen" data-t="zusammen" data-t-title="zusammenTitel" hidden></button>
+        <button id="deckel" class="umschalter" aria-pressed="true" data-t="deckel" data-t-title="deckelTitel"></button>
+      </div>
+    </div>
+    <div class="ansicht">
+      <canvas id="hand"></canvas>
+      <span id="handTipp" class="klein tipp" data-t="handTipp"></span>
+    </div>
+    <!-- One row of tools for every board. The same button where two boards do the
+         same thing (grips; "Pause sending" = glove f / test board x); the rest per board. -->
+    <div class="werkzeuge">
+      <button data-griff="offen" data-t="griffOffen" data-only="hand bglove" data-seriell disabled></button>
+      <button data-griff="faust" data-t="griffFaust" data-only="hand bglove" data-seriell disabled></button>
+      <button data-griff="zeigen" data-t="griffZeigen" data-only="hand bglove" data-seriell disabled></button>
+      <button data-griff="greifen" data-t="griffGreifen" data-only="hand bglove" data-seriell disabled></button>
+      <button class="griffe-knopf" aria-pressed="false" data-t="griffeBearbeiten" data-t-title="griffeBearbeitenTitel" data-only="hand bglove"></button>
+      <button id="test" data-t="servotest" data-t-title="servotestTitel" data-only="hand" data-seriell disabled></button>
+      <button id="reset2" data-t="reset" data-t-title="resetTitel" data-only="hand" data-seriell disabled></button>
+      <button id="bPause" class="umschalter" aria-pressed="false" data-t="bPause" data-t-title="bPauseTitel" data-only="glove bglove" data-seriell disabled></button>
+      <button id="kamEingabeKnopf" class="umschalter" aria-pressed="false" data-t="kamEingabe" data-t-title="kamEingabeTitel" data-only="bglove" data-seriell disabled></button>
+      <button data-befehl="H" data-t="bAlsHand" data-t-title="bAlsHandTitel" data-only="bglove bsniff" data-seriell disabled></button>
+      <button data-befehl="G" data-t="bAlsHandschuh" data-t-title="bAlsHandschuhTitel" data-only="bhand bsniff" data-seriell disabled></button>
+      <button data-befehl="S" data-t="bAlsSniffer" data-t-title="bAlsSnifferTitel" data-only="bglove bhand" data-seriell disabled></button>
+      <button data-befehl="k" data-t="kurzKal" data-t-title="kurzKalTitel" data-only="glove" data-seriell disabled></button>
+      <button id="kriechKnopf" class="umschalter" data-befehl="d" aria-pressed="false" data-t-title="kriechTitel" data-only="glove" data-seriell disabled></button>
+      <button data-befehl="r" data-t="rohwerte" data-t-title="rohwerteTitel" data-only="glove" data-seriell disabled></button>
+      <button data-befehl="a" data-t="werte" data-t-title="werteTitel" data-only="glove" data-seriell disabled></button>
+      <button data-befehl="0" data-t="simVerlust0" data-t-title="simVerlustTitel" data-only="sim bhand" data-seriell disabled></button>
+      <button data-befehl="3" data-t="simVerlust3" data-t-title="simVerlustTitel" data-only="sim bhand" data-seriell disabled></button>
+      <button data-befehl="s" data-t="simStumm" data-t-title="simStummTitel" data-only="sim bhand" data-seriell disabled></button>
+    </div>
+  </section>
+
+  <section class="panel finger-panel">
+    <div class="zeile"><h2 data-t="finger"></h2><span class="klein lang" data-t="fingerTipp"></span><span id="rate" class="klein"></span></div>
+    <p id="leer" class="leer" data-t-html="leer"></p>
+    <div id="demoAuswahl" class="demo-auswahl" hidden data-only="hand">
+      <span class="klein" data-t="demoServos"></span>
+    </div>
+    <div id="karten" class="karten"></div>
+  </section>
+
+  <section class="panel verlauf-panel">
+    <div class="zeile"><h2 data-t="verlauf"></h2><span class="klein lang" data-t="verlaufTipp"></span></div>
+    <canvas id="verlauf"></canvas>
+  </section>
+
+  <section class="panel pakete-panel">
+    <div class="zeile">
+      <h2 data-t="pakete"></h2>
+      <label class="schalter" data-only="bsniff" data-t-title="sniffKanalTitel"><span data-t="sniffKanal"></span>
+        <select id="sniffKanal" disabled>
+          <option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option>
+          <option>8</option><option>9</option><option>10</option><option>11</option><option>12</option><option>13</option>
+        </select></label>
+      <label class="schalter" data-t-title="paketeImLogTitel"><input id="paketeImLog" type="checkbox"> <span data-t="paketeImLog"></span></label>
+      <button id="paketeLeeren" data-t="leeren"></button>
+      <button id="wiresharkSpeichern" data-t="wireshark" disabled></button>
+      <button id="paketeAn" class="umschalter" aria-pressed="false" data-t-title="paketeAnTitel" disabled></button>
+    </div>
+    <div class="pakete-box">
+      <!-- Bridge as sniffer: one row per sender it hears (js/mitschnitt.js) -->
+      <div class="sniffer" data-only="bsniff">
+        <p id="sniffStatus" class="meldung klein"></p>
+        <table class="pakete" id="sniffTabelle" hidden data-t-aria="s_tabelle">
+          <thead><tr>
+            <th data-t="s_sender"></th><th class="n" data-t="s_proS"></th><th class="n" data-t="s_rssi"></th>
+            <th data-t="s_typen"></th><th data-t="s_an"></th>
+          </tr></thead>
+          <tbody id="sniffZeilen"></tbody>
+        </table>
+        <p id="sniffAuswahl" class="klein"></p>
+      </div>
+      <p id="paketeLeer" class="leer klein"></p>
+      <table class="pakete" id="paketeTabelle" hidden>
+        <thead><tr>
+          <th data-t="p_nachricht"></th><th class="n" data-t="p_bytes"></th><th class="n" data-t="p_minmax"></th>
+          <th class="n" data-t="p_proS"></th><th class="n" data-t="p_bps"></th><th class="n" data-t="p_anzahl"></th>
+        </tr></thead>
+        <tbody id="paketeZeilen"></tbody>
+        <tfoot><tr><td data-t="p_summe"></td><td></td><td></td>
+          <td class="n" id="paketeSummeRate"></td><td class="n" id="paketeSummeBps"></td><td class="n" id="paketeSummeAnzahl"></td></tr></tfoot>
+      </table>
+      <p id="paketeLuft" class="klein pakete-fuss"></p>
+      <p id="paketeDiagnose" class="meldung klein" data-art="warn" hidden></p>
+      <div id="vergleich" class="vergleich" hidden></div>
+    </div>
+  </section>
+
+  <section class="panel partner-panel">
+    <div class="zeile"><h2 data-t="funkPartner"></h2><span id="partner" class="klein">–</span></div>
+    <div class="partner" data-only="glove hand bglove bhand">
+      <input id="partnerEingabe" type="text" placeholder="58:E6:C5:F8:99:1C" spellcheck="false"
+             autocomplete="off" data-t-aria="macEingabe" data-seriell disabled>
+      <button id="partnerSetzen" data-t="setzen" data-t-title="setzenTitel" data-seriell disabled></button>
+      <button id="partnerAlle" data-t="jederPartner" data-t-title="jederPartnerTitel" data-seriell disabled></button>
+    </div>
+    <div class="partner" id="uebernehmenZeile" hidden data-only="hand">
+      <span class="klein"><span data-t="geradeVerbunden"></span> <span id="letzterHandschuh"></span></span>
+      <button id="partnerUebernehmen" data-t="uebernehmen" data-t-title="uebernehmenTitel"></button>
+    </div>
+    <p class="klein" data-t="partnerTipp"></p>
+  </section>
+
+  <section class="panel log-panel">
+    <div class="zeile"><h2 data-t="seriellerMonitor"></h2>
+      <button id="befehleKnopf" class="umschalter" aria-pressed="false" data-t="befehle" data-t-title="befehleTitel"></button>
+      <button id="logLeeren" data-t="leeren"></button></div>
+    <div class="befehl">
+      <input id="befehlEingabe" type="text" spellcheck="false" autocomplete="off" data-t-aria="befehl" placeholder="i" data-seriell disabled>
+      <button id="befehlSenden" data-t="senden" data-seriell disabled></button>
+    </div>
+    <pre id="log"></pre>
+  </section>
+</main>
+
+<dialog id="kal" aria-labelledby="kalTitel">
+  <div class="kal">
+    <div class="kal-bild">
+      <canvas id="kalHand" aria-hidden="true"></canvas>
+      <span id="kalTipp" class="klein tipp"></span>
+    </div>
+    <div class="kal-arbeit">
+      <ol id="schritte" class="schritte"></ol>
+      <h3 id="kalTitel"></h3>
+      <p id="kalText" class="kal-text"></p>
+      <div id="kalAuswahlBox" hidden><p class="klein" data-t="k_auswahl" style="margin:0 0 6px"></p><div id="kalAuswahl" class="kal-auswahl"></div></div>
+      <div id="uhr" class="uhr" hidden><span id="uhrZahl" class="zahl"></span><span id="uhrText" class="klein"></span></div>
+      <div id="fortschritt" class="fortschritt" hidden><div></div></div>
+      <div id="live" class="live"></div>
+      <div id="ergebnis" class="ergebnis-box" hidden></div>
+      <p id="urteil" class="urteil"></p>
+      <div class="kal-knoepfe">
+        <button id="kalAbbrechen"></button>
+        <button id="kalWiederherstellen" data-t="k_wiederherstellen" hidden></button>
+        <span class="luecke"></span>
+        <label class="auto" id="autoZeile"><input id="auto" type="checkbox" checked> <span data-t="automatisch"></span></label>
+        <button id="kalZweit" hidden></button>
+        <button id="kalHaupt" class="haupt"></button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<!-- The camera for the hand tracking (camera calibration, camera as glove). Never shown itself:
+     the windows draw its picture mirrored into a canvas. -->
+<video id="kamVideo" class="km-quelle" muted playsinline aria-hidden="true"></video>
+
+<!-- Camera as glove (test board as glove): the tracked hand steers the values the board sends -->
+<dialog id="kamEingabeFenster" class="fenster" aria-labelledby="kamEingabeTitelH">
+  <div class="fenster-kopf"><h3 id="kamEingabeTitelH" data-t="kamEingabe"></h3><button class="zu" data-t="schliessen"></button></div>
+  <div class="fenster-inhalt">
+    <p class="klein" data-t="ke_text"></p>
+    <div class="km-eingabe-bild"><canvas id="kamEingabeBild" aria-hidden="true"></canvas></div>
+    <p id="kamEingabeStatus" class="urteil"></p>
+    <!-- Mapping: which camera bend counts as open (0) and closed (1), per finger -->
+    <div class="zeile"><h4 data-t="ke_mapping"></h4><span id="kamMapInfo" class="klein"></span></div>
+    <div id="kamMapZeilen" class="live"></div>
+    <div class="reihe">
+      <button id="kamMapStart" class="haupt" data-t="ke_mapStart" data-t-title="ke_mapStartTitel"></button>
+      <button id="kamMapReset" data-t="ke_mapReset" data-t-title="ke_mapResetTitel"></button>
+    </div>
+  </div>
+</dialog>
+
+<!-- Camera calibration (glove) -->
+<dialog id="kamKal" aria-labelledby="kamTitel">
+  <div class="kal">
+    <div class="kal-bild km-hand">
+      <canvas id="kamHand" aria-hidden="true"></canvas>
+      <div id="kamGeistBox" class="km-geist" hidden><canvas id="kamGeist" aria-hidden="true"></canvas></div>
+      <!-- camera picture in the corner (can be switched off), mirrored, with the tracked hand -->
+      <div id="kamVideoBox" class="km-video"><canvas id="kamBild" aria-hidden="true"></canvas></div>
+      <span id="kamTipp" class="klein tipp"></span>
+    </div>
+    <div class="kal-arbeit">
+      <h3 id="kamTitel"></h3>
+      <p class="kal-text" data-t="km_text"></p>
+      <p class="klein" style="margin:0" data-t="km_privat"></p>
+      <p id="kamDemo" class="klein" style="margin:0" data-t="km_demo" hidden></p>
+      <div id="kamLive" class="live"></div>
+      <p id="kamUrteil" class="urteil"></p>
+      <div class="kal-knoepfe">
+        <button id="kamAbbrechen" data-t="abbrechen"></button>
+        <button id="kamNeu" data-t="km_neu"></button>
+        <button id="kamBildKnopf" class="umschalter" aria-pressed="true" data-t="km_bild" data-t-title="km_bildTitel"></button>
+        <span class="luecke"></span>
+        <button id="kamSpeichern" class="haupt"></button>
+      </div>
+    </div>
+  </div>
+</dialog>
+
+<!-- Record and replay (floating window) -->
+<dialog id="aufnahmeFenster" class="fenster" aria-labelledby="aufnahmeTitelH">
+  <div class="fenster-kopf"><h3 id="aufnahmeTitelH" data-t="aufnahmeFenster"></h3><button class="zu" data-t="schliessen"></button></div>
+  <div class="fenster-inhalt">
+    <p class="klein" data-t="a_text"></p>
+    <div class="reihe">
+      <button id="aufnehmen" class="haupt"></button>
+      <span id="aufnahmeQuelle" class="klein"></span>
+    </div>
+    <div class="reihe">
+      <span id="aufnahmeInfo" class="klein"></span>
+      <span class="luecke"></span>
+      <button id="aufnahmeSpeichern" data-t="a_speichern" disabled></button>
+      <button id="aufnahmeLaden" data-t="a_laden"></button>
+      <input id="aufnahmeDatei" type="file" accept=".json,application/json" hidden>
+    </div>
+    <div class="reihe">
+      <label class="klein"><span data-t="a_ziel"></span>
+        <select id="abspielZiel">
+          <option value="view" data-t="a_zielAnsicht"></option>
+          <option value="hand" data-t="a_zielHand"></option>
+          <option value="glove" data-t="a_zielFunk"></option>
+        </select></label>
+      <label class="klein"><span data-t="a_tempo"></span>
+        <select id="abspielTempo"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select></label>
+      <label class="schalter"><input id="abspielSchleife" type="checkbox"> <span data-t="a_schleife"></span></label>
+    </div>
+    <div class="reihe">
+      <button id="abspielen" disabled></button>
+      <button id="abspielStopp" data-t="a_stopp" disabled></button>
+      <input id="abspielPos" type="range" min="0" max="1000" value="0" style="flex:1" disabled data-t-aria="a_position">
+      <span id="abspielZeit" class="klein">0:00</span>
+    </div>
+    <p id="abspielMeldung" class="meldung klein"></p>
+  </div>
+</dialog>
+
+<!-- Link check (floating window) -->
+<dialog id="linkFenster" class="fenster" aria-labelledby="linkTitelH">
+  <div class="fenster-kopf"><h3 id="linkTitelH" data-t="linktest"></h3><button class="zu" data-t="schliessen"></button></div>
+  <div class="fenster-inhalt">
+    <p class="klein" data-t="l_text"></p>
+    <div class="reihe">
+      <label class="klein"><span data-t="l_dauer"></span>
+        <select id="linkDauer">
+          <option value="30">30 s</option><option value="60" selected>1 min</option><option value="120">2 min</option>
+          <option value="0" data-t="l_offen"></option>
+        </select></label>
+      <button id="linkStart" class="haupt"></button>
+      <span id="linkZeit" class="klein"></span>
+      <span class="luecke"></span>
+      <button id="linkCsv" data-t="l_csv" disabled></button>
+    </div>
+    <p id="linkMeldung" class="meldung klein"></p>
+    <div id="linkKacheln" class="kacheln"></div>
+    <canvas id="linkKurve" aria-hidden="true"></canvas>
+    <p class="klein" data-t="l_legende"></p>
+    <div>
+      <div class="reihe">
+        <strong style="font-size:13px" data-t="l_reichweite"></strong>
+        <input id="linkMarke" type="text" placeholder="3 m" spellcheck="false" autocomplete="off" style="width:8em" data-t-aria="l_markeName">
+        <button id="linkMarkieren" data-t="l_markieren" data-t-title="l_markierenTitel" disabled></button>
+      </div>
+      <table class="liste" id="linkMarken" hidden>
+        <thead><tr><th data-t="l_ort"></th><th class="n" data-t="l_signalHs"></th><th class="n" data-t="l_signalHand"></th>
+          <th class="n" data-t="l_durchlaeufe"></th><th class="n" data-t="l_wiederholt"></th><th class="n" data-t="l_rtt"></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</dialog>
+
+<!-- Signals (floating window): oscilloscope over every number the boards print, and the wiring check (js/signale.js) -->
+<dialog id="signaleFenster" class="fenster" aria-labelledby="signaleTitelH">
+  <div class="fenster-kopf">
+    <h3 id="signaleTitelH" data-t="signale"></h3>
+    <div class="modus" role="group" id="sigTabs" data-t-aria="sg_tabs">
+      <button data-tab="scope" aria-pressed="true" data-t="sg_tabScope"></button><button data-tab="pruef" aria-pressed="false" data-t="sg_tabPruef"></button>
+    </div>
+    <button class="zu" data-t="schliessen"></button>
+  </div>
+  <div class="fenster-inhalt">
+    <div id="sigScope" class="sig-scope">
+      <div class="reihe sig-steuer">
+        <div class="modus" role="group" data-t-aria="sg_lauf">
+          <button id="sigRun" aria-pressed="true" data-t="sg_run" data-t-title="sg_runT"></button><button id="sigPause" aria-pressed="false" data-t="sg_pause" data-t-title="sg_pauseT"></button><button id="sigSingle" aria-pressed="false" data-t="sg_single" data-t-title="sg_singleT"></button>
+        </div>
+        <label class="klein"><span data-t="sg_zeit"></span>
+          <select id="sigZeit">
+            <option value="1000">1 s</option><option value="2000">2 s</option><option value="5000">5 s</option><option value="10000" selected>10 s</option>
+            <option value="20000">20 s</option><option value="30000">30 s</option><option value="60000">60 s</option>
+          </select></label>
+        <span class="sig-trigger">
+          <label class="klein"><span data-t="sg_trigger"></span>
+            <select id="sigTrigKanal"></select></label>
+          <select id="sigTrigFlanke" data-t-aria="sg_flanke"><option value="rising" data-t="sg_steigend"></option><option value="falling" data-t="sg_fallend"></option></select>
+          <label class="klein"><span data-t="sg_pegel"></span> <input id="sigPegel" type="number" step="any" value="0.5"></label>
+        </span>
+        <button id="sigCursor" class="umschalter" aria-pressed="false" data-t="sg_cursor" data-t-title="sg_cursorT"></button>
+        <label class="klein"><span data-t="sg_skala"></span>
+          <select id="sigSkala"><option value="auto" data-t="sg_skalaEinzeln"></option><option value="shared" data-t="sg_skalaGemeinsam"></option></select></label>
+        <span class="luecke"></span>
+        <button id="sigLeeren" data-t="sg_leeren" data-t-title="sg_leerenT"></button>
+        <button id="sigCsv" data-t="sg_csv" data-t-title="sg_csvT"></button>
+      </div>
+      <div class="reihe sig-fragen" data-only="glove hand">
+        <span class="klein" data-t="sg_fragen"></span>
+        <button id="sigRaw" class="umschalter" aria-pressed="false" data-only="glove" data-sig-seriell disabled data-t="sg_roh" data-t-title="sg_rohT"></button>
+        <button id="sigMv" class="umschalter" aria-pressed="false" data-only="glove" data-sig-seriell disabled data-t="sg_mv" data-t-title="sg_mvT"></button>
+        <button id="sigUs" class="umschalter" aria-pressed="false" data-only="hand" data-sig-seriell disabled data-t="sg_us" data-t-title="sg_usT"></button>
+        <button id="sigGrad" class="umschalter" aria-pressed="false" data-only="hand" data-sig-seriell disabled data-t="sg_grad" data-t-title="sg_gradT"></button>
+      </div>
+      <canvas id="sigBild" class="sig-bild" tabindex="0" role="img" data-t-aria="sg_bildAria"></canvas>
+      <p id="sigInfo" class="sig-info klein"></p>
+      <p id="sigMeldung" class="meldung klein"></p>
+      <p id="sigLeer" class="klein" data-t="sg_leer"></p>
+      <div id="sigTabelleBox" class="sig-tabelle sig-kanaele" hidden>
+        <table class="liste" id="sigTabelle">
+          <thead><tr>
+            <th><button id="sigAlle" class="sig-mini" data-t="sg_alle"></button><button id="sigKeine" class="sig-mini" data-t="sg_keine"></button></th>
+            <th data-t="sg_kanal"></th><th class="n" data-t="sg_jetzt"></th><th class="n" data-t="sg_min"></th><th class="n" data-t="sg_max"></th><th class="n" data-t="sg_mittel"></th><th class="n" data-t="sg_proS"></th>
+            <th class="n sig-cur" data-t="sg_spalteA"></th><th class="n sig-cur" data-t="sg_spalteB"></th><th class="n sig-cur" data-t="sg_spalteD"></th>
+          </tr></thead>
+          <tbody id="sigZeilen"></tbody>
+        </table>
+      </div>
+    </div>
+    <div id="sigPruef" hidden>
+      <p class="klein" data-t="sg_pruefText"></p>
+      <div class="reihe">
+        <button id="sigPruefStart" class="haupt" data-sig-seriell data-only="glove hand" disabled></button>
+      </div>
+      <p id="sigPruefMeldung" class="meldung"></p>
+      <div id="sigPruefErgebnis" class="sig-ergebnis"></div>
+    </div>
+  </div>
+</dialog>
+
+<!-- Servo limits (floating window, robot hand) -->
+<!-- Grip timing (robot hand and test board as glove): position and start time per finger -->
+<dialog id="griffeFenster" class="fenster" aria-labelledby="griffeTitelH">
+  <div class="fenster-kopf"><h3 id="griffeTitelH" data-t="griffeBearbeiten"></h3><button class="zu" data-t="schliessen"></button></div>
+  <div class="fenster-inhalt">
+    <p class="klein" data-t="griffeText" style="margin:0"></p>
+    <div class="modus" role="group" id="griffWahl" data-t-aria="griffeBearbeiten">
+      <button data-wert="offen" data-t="griffOffen"></button><button data-wert="faust" data-t="griffFaust"></button><button data-wert="zeigen" data-t="griffZeigen"></button><button data-wert="greifen" data-t="griffGreifen"></button>
+    </div>
+    <div id="griffListe" class="griff-liste"></div>
+    <p id="griffMeldung" class="meldung klein"></p>
+    <div class="reihe">
+      <button id="griffStandard" data-t="g_standard" data-t-title="griffStandardTitel"></button>
+      <button id="griffExport" data-t="griffExport" data-t-title="griffExportTitel"></button>
+      <button id="griffImport" data-t="griffImport" data-t-title="griffImportTitel"></button>
+      <input id="griffDatei" type="file" accept=".json,application/json" hidden>
+      <span class="luecke"></span>
+      <button id="griffProbieren" class="haupt" data-t="griffProbieren" data-seriell disabled></button>
+    </div>
+  </div>
+</dialog>
+
+<!-- Pin assignment (glove command P, robot hand command K), js/pins.js -->
+<dialog id="pinsFenster" class="fenster" aria-labelledby="pinsTitelH">
+  <div class="fenster-kopf"><h3 id="pinsTitelH" data-t="pins"></h3><button class="zu" data-t="schliessen"></button></div>
+  <div class="fenster-inhalt">
+    <p id="pinsText" class="klein"></p>
+    <p id="pinsMeldung" class="meldung klein"></p>
+    <div id="pinsListe" class="pin-liste"></div>
+    <div class="knoepfe2" style="margin-top:8px">
+      <button id="pinsStandard" data-t="p_alleStandard" data-t-title="p_alleStandardTitel"></button>
+      <button id="pinsSpeichern" class="haupt" data-t="p_speichern"></button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="grenzenFenster" class="fenster" aria-labelledby="grenzenTitelH">
+  <div class="fenster-kopf"><h3 id="grenzenTitelH" data-t="grenzen"></h3><button class="zu" data-t="schliessen"></button></div>
+  <div class="fenster-inhalt">
+    <p class="klein" data-t="g_text"></p>
+    <label class="schalter"><input id="grenzenFolgen" type="checkbox" checked> <span data-t="g_folgen"></span></label>
+    <p id="grenzenMeldung" class="meldung klein"></p>
+    <div id="grenzenListe" style="display:grid;gap:8px"></div>
+    <!-- Top speed of all servos (command b, firmware 2.1) -->
+    <div id="tempoZeile" class="grenze" style="--f: var(--text)">
+      <div class="name" data-t="g_tempo"></div>
+      <div style="display:grid;gap:4px">
+        <p class="klein" data-t="g_tempoText" style="margin:0"></p>
+        <div class="regler" style="grid-template-columns:3.6em 1fr 6.4em auto"><span class="klein" data-t="g_tempoMax"></span>
+          <input id="tempoRegler" type="range" min="10" max="600" step="10" data-t-aria="g_tempo">
+          <span style="white-space:nowrap"><input id="tempoZahl" type="number" min="10" max="600" step="10"> °/s</span>
+          <button id="tempoSpeichern" class="haupt" data-t="g_speichern" disabled></button></div>
+      </div>
+      <div class="knoepfe2"><span id="tempoInfo" class="klein"></span>
+        <button id="tempoStandard" data-t="g_standard" data-t-title="g_tempoStandardTitel"></button></div>
+    </div>
+    <div class="reihe">
+      <button id="grenzenZurueck" data-t="zurueckgeben" data-t-title="resetTitel"></button>
+      <span class="luecke"></span>
+      <button id="grenzenAlle" class="haupt" data-t="g_alleSpeichern" disabled></button>
+    </div>
+  </div>
+</dialog>
+
+<!-- Serial commands of the board that is shown -->
+<dialog id="befehleFenster" class="fenster" aria-labelledby="befehleTitelH">
+  <div class="fenster-kopf"><h3 id="befehleTitelH"></h3><button class="zu" data-t="schliessen"></button></div>
+  <div class="fenster-inhalt">
+    <p class="klein" data-t="b_text"></p>
+    <div class="befehle-box">
+      <table class="liste befehle">
+        <thead><tr><th data-t="b_befehl"></th><th data-t="b_wirkung"></th></tr></thead>
+        <tbody id="befehleListe"></tbody>
+      </table>
+    </div>
+    <p id="befehleQuelle" class="klein"></p>
+  </div>
+</dialog>
+
+<!-- Flash firmware (modal) -->
+<dialog id="flashFenster" class="fenster modal" aria-labelledby="flashTitelH">
+  <div class="fenster-kopf"><h3 id="flashTitelH" data-t="flashen"></h3><button class="zu" data-t="schliessen"></button></div>
+  <div class="fenster-inhalt">
+    <p class="klein" data-t="fl_unter"></p>
+    <!-- The comparison: build on the board next to the newest build on GitHub -->
+    <section class="vergleich" aria-live="polite" data-t-aria="fl_vergleich">
+      <div class="stand">
+        <span class="was" data-t="fl_aufBoard"></span>
+        <span class="hash" id="flHashBoard">–</span>
+        <span class="wer" id="flWerBoard"></span>
+      </div>
+      <div class="urteil" id="flUrteil">
+        <div class="linie"></div>
+        <p id="flUrteilText"></p>
+      </div>
+      <div class="stand rechts">
+        <span class="was" data-t="fl_aufGh"></span>
+        <span class="hash" id="flHashGh">–</span>
+        <span class="wer" id="flWerGh"></span>
+      </div>
+    </section>
+    <div class="fl-spalten">
+      <section class="gh" aria-labelledby="flBoardH">
+        <div class="reihe"><strong id="flBoardH" data-t="fl_board"></strong><span class="luecke"></span>
+          <select id="flashZiel" data-t-aria="fl_board"></select></div>
+        <div id="flBoardNeu" class="reihe" hidden>
+          <p class="klein" data-t="fl_neuText" style="margin:0;flex:1;min-width:12em"></p>
+          <button id="flVerbinden" data-t="fl_verbinden"></button>
+        </div>
+        <div id="flBoardDa" style="display:grid;gap:6px">
+          <p class="geraet" id="flBoardName"></p>
+          <dl class="fakten">
+            <dt data-t="fl_fw"></dt><dd id="flBoardFw"></dd>
+            <dt>MAC</dt><dd id="flBoardMac" class="mono"></dd>
+            <dt>USB</dt><dd id="flBoardUsb" class="mono"></dd>
+            <dt data-t="fl_chip"></dt><dd id="flBoardChip"></dd>
+            <dt data-t="fl_einst"></dt><dd id="flBoardEinst"></dd>
+          </dl>
+          <p id="flStumm" class="stumm klein" hidden data-t="fl_stumm"></p>
+        </div>
+      </section>
+      <section id="ghBox" class="gh" aria-labelledby="flGhH">
+        <div class="reihe">
+          <strong id="flGhH" data-t="gh_titel"></strong>
+          <span id="ghWer" class="klein"></span>
+          <span class="luecke"></span>
+          <button id="ghAnmelden" data-t="gh_anmelden"></button>
+          <button id="ghAktualisieren" data-t="gh_aktualisieren" hidden></button>
+          <button id="ghAbmelden" data-t="gh_abmelden" hidden></button>
+        </div>
+        <div id="ghLogin" class="gh-login" hidden>
+          <p class="klein" data-t-html="gh_erklaerung"></p>
+          <div class="reihe">
+            <a class="klein" id="ghTokenLink" target="_blank" rel="noopener" data-t="gh_tokenLink"></a>
+            <a class="klein" id="ghTokenKlassisch" target="_blank" rel="noopener" data-t="gh_tokenKlassisch"></a>
+          </div>
+          <div class="reihe">
+            <input id="ghToken" type="password" autocomplete="off" spellcheck="false" style="flex:1;min-width:12em">
+            <label class="schalter"><input id="ghMerken" type="checkbox" checked> <span data-t="gh_merken"></span></label>
+            <button id="ghSpeichern" class="haupt" data-t="gh_einloggen"></button>
+          </div>
+        </div>
+        <p id="ghAus" class="klein" data-t="fl_ghAus" style="margin:0"></p>
+        <ul id="ghRepos" class="repos" hidden></ul>
+        <p id="ghMeldung" class="meldung klein"></p>
+      </section>
+    </div>
+    <div class="flash-wahl">
+      <div class="wahl"><span data-t="fl_als"></span>
+        <div class="segment" role="group" id="flRolle" data-t-aria="fl_als">
+          <button data-wert="glove" data-t="g_glove"></button><button data-wert="sim" data-t="g_sim"></button><button data-wert="hand" data-t="g_hand"></button><button data-wert="bridge" data-t="fl_bridge"></button>
+        </div></div>
+      <div class="wahl"><span data-t="fl_variante"></span>
+        <div class="segment" role="group" id="flVariante" data-t-aria="fl_variante">
+          <button data-wert="beetle">Beetle</button><button data-wert="devkitc">DevKitC-1</button><button data-wert="esp32">ESP32 DevKit</button>
+        </div>
+        <span class="klein" data-t="fl_varianteTipp"></span></div>
+      <div class="wahl"><span data-t="fl_art"></span>
+        <div class="segment" role="group" id="flArt" data-t-aria="fl_art">
+          <button data-wert="app" data-t="fl_app"></button><button data-wert="full" data-t="fl_full"></button>
+        </div>
+        <span class="klein" id="flArtTipp"></span></div>
+    </div>
+    <details id="flDateiBox">
+      <summary data-t="fl_eigene"></summary>
+      <div style="display:grid;gap:8px;margin-top:8px">
+        <div id="flashAblage" class="ablage" tabindex="0" role="button"><span data-t="f_ablage"></span><input id="flashDatei" type="file" accept=".bin" hidden></div>
+        <div class="reihe" id="flDateiAktiv" hidden><span id="flDateiName" class="mono klein"></span><span class="luecke"></span><button id="flDateiWeg" data-t="fl_eigeneWeg"></button></div>
+        <div class="reihe">
+          <span class="klein" data-t="gh_vonHand"></span>
+          <a class="klein" href="https://github.com/puls-MINT-hand-prothese-2026/ansteuerung_Gruppe1/releases/tag/firmware-latest" target="_blank" rel="noopener" data-t="f_linkHs"></a>
+          <a class="klein" href="https://github.com/puls-MINT-hand-prothese-2026/ansteuerung_hand/releases/tag/firmware-latest" target="_blank" rel="noopener" data-t="f_linkHand"></a>
+          <a class="klein" href="https://github.com/puls-MINT-hand-prothese-2026/tools/releases/tag/firmware-latest" target="_blank" rel="noopener" data-t="f_linkBridge"></a>
+        </div>
+      </div>
+    </details>
+    <p id="flashInfo" class="plan meldung"></p>
+    <p id="flashWarnung" class="meldung" data-art="warn"></p>
+    <label class="schalter" id="flashSicherungZeile" hidden><input id="flashSicherung" type="checkbox" checked> <span id="flashSicherungText"></span></label>
+    <div class="balken-gross" id="flashBalken" hidden><div></div></div>
+    <div class="los">
+      <button id="flashStart" class="haupt" disabled></button>
+      <p id="flashStatus" class="meldung"></p>
+    </div>
+    <details id="flashLogBox" class="flash-log">
+      <summary><span data-t="f_log"></span> <span id="flashLogAnzahl" class="klein"></span></summary>
+      <div class="reihe">
+        <label class="klein"><span data-t="f_logStufe"></span>
+          <select id="flashLogStufe">
+            <option value="normal" data-t="f_logNormal"></option>
+            <option value="debug" data-t="f_logDebug"></option>
+            <option value="trace" data-t="f_logTrace"></option>
+          </select></label>
+        <span class="luecke"></span>
+        <button id="flashLogKopieren" data-t="f_logKopieren"></button>
+        <button id="flashLogSpeichern" data-t="f_logSpeichern"></button>
+        <button id="flashLogLeeren" data-t="f_logLeeren"></button>
+      </div>
+      <pre id="flashLog" class="flash-log-text"></pre>
+    </details>
+  </div>
+</dialog>
+
+<!-- The page's code, in this order (one global scope, like one script) -->
+<script src="js/grundlagen.js"></script>
+<script src="js/texte.js"></script>
+<script src="js/verbindung.js"></script>
+<script src="js/funkpakete.js"></script>
+<script src="js/mitschnitt.js"></script>
+<script src="js/demo.js"></script>
+<script src="js/hand3d.js"></script>
+<script src="js/karten.js"></script>
+<script src="js/kalibrierung.js"></script>
+<script src="js/kamera.js"></script>
+<script src="js/werkzeuge.js"></script>
+<script src="js/versionen.js"></script>
+<script src="js/servogrenzen.js"></script>
+<script src="js/pins.js"></script>
+<script src="js/linktest.js"></script>
+<script src="js/aufnahme.js"></script>
+<script src="js/flashen.js"></script>
+<script src="js/signale.js"></script>
+<script src="js/start.js"></script>
+</body>
+</html>
